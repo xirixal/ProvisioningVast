@@ -1,182 +1,57 @@
 #!/bin/bash
-# This file will be sourced in init.sh
-# Namespace functions with provisioning_
+# =============================================
+# Custom Forge Provisioning for Vast.ai
+# - Overlays your pre-configured files safely
+# - Downloads your main model
+# - Prevents git repo breakage
+# =============================================
 
-# https://raw.githubusercontent.com/ai-dock/stable-diffusion-webui/main/config/provisioning/default.sh
+echo "=== Starting custom Forge provisioning ==="
 
-### Edit the following arrays to suit your workflow - values must be quoted and separated by newlines or spaces.
-### If you specify gated models you'll need to set environment variables HF_TOKEN and/orf CIVITAI_TOKEN
+cd ${WORKSPACE}
 
-DISK_GB_REQUIRED=30
+# 1. Download your custom zip if not present
+if [ ! -f "forge_template.zip" ]; then
+    echo "→ Downloading your forge_template.zip..."
+    wget -q --show-progress -O forge_template.zip https://files.catbox.moe/8tg9gk.zip
+fi
 
-APT_PACKAGES=(
-    #"package-1"
-    #"package-2"
-)
+# 2. Safe overlay: only your custom files (extensions, configs, wildcards, Civitaibrowser+)
+if [ -f "forge_template.zip" ]; then
+    echo "→ Overlaying your custom setup (extensions, configs, wildcards, Civitaibrowser+...)"
 
-PIP_PACKAGES=(
-    "onnxruntime-gpu"
-)
+    cd stable-diffusion-webui-forge
+    unzip -o ../forge_template.zip \
+      extensions/* \
+      wildcards/* \
+      config.json \
+      ui-config.json \
+      styles.csv \
+      scripts/* \
+      -x "repositories/*" "models/*" "*.git*" 2>/dev/null || true
+    cd ..
 
-EXTENSIONS=()
+    echo "→ Your custom local setup applied successfully!"
+fi
 
-CHECKPOINT_MODELS=(
-    "https://huggingface.co/tonera/waiNSFWIllustrious_v150/resolve/main/svdq-int4_r32-waiNSFWIllustrious_v150.safetensors"
+# 3. Download your main model (one model only, as you requested)
+MODEL_URL="https://huggingface.co/tonera/waiNSFWIllustrious_v150/resolve/main/svdq-int4_r32-waiNSFWIllustrious_v150.safetensors"
+MODEL_PATH="stable-diffusion-webui-forge/models/Stable-diffusion/svdq-int4_r32-waiNSFWIllustrious_v150.safetensors"
 
-)
+if [ ! -f "${MODEL_PATH}" ]; then
+    echo "→ Downloading your main model (waiNSFWIllustrious_v150)..."
+    mkdir -p stable-diffusion-webui-forge/models/Stable-diffusion
+    wget -q --show-progress -O "${MODEL_PATH}" "${MODEL_URL}"
+    echo "→ Model downloaded successfully!"
+else
+    echo "→ Main model already present."
+fi
 
-LORA_MODELS=()
+# 4. Clean any broken git repositories (critical fix for the loop error)
+echo "→ Cleaning potential broken git repos..."
+rm -rf stable-diffusion-webui-forge/repositories/stable-diffusion-stability-ai \
+       stable-diffusion-webui-forge/repositories/generative-models \
+       stable-diffusion-webui-forge/repositories/stable-diffusion-webui-assets \
+       2>/dev/null || true
 
-VAE_MODELS=()
-
-ESRGAN_MODELS=()
-
-CONTROLNET_MODELS=()
-
-
-### DO NOT EDIT BELOW HERE UNLESS YOU KNOW WHAT YOU ARE DOING ###
-
-function provisioning_start() {
-    # We need to apply some workarounds to make old builds work with the new default
-    if [[ ! -d /opt/environments/python ]]; then 
-        export MAMBA_BASE=true
-    fi
-    source /opt/ai-dock/etc/environment.sh
-    source /opt/ai-dock/bin/venv-set.sh webui
-
-    DISK_GB_AVAILABLE=$(($(df --output=avail -m "${WORKSPACE}" | tail -n1) / 1000))
-    DISK_GB_USED=$(($(df --output=used -m "${WORKSPACE}" | tail -n1) / 1000))
-    DISK_GB_ALLOCATED=$(($DISK_GB_AVAILABLE + $DISK_GB_USED))
-    provisioning_print_header
-    provisioning_get_apt_packages
-    provisioning_get_pip_packages
-    provisioning_get_extensions
-    provisioning_get_models \
-        "${WORKSPACE}/storage/stable_diffusion/models/ckpt" \
-        "${CHECKPOINT_MODELS[@]}"
-    provisioning_get_models \
-        "${WORKSPACE}/storage/stable_diffusion/models/lora" \
-        "${LORA_MODELS[@]}"
-    provisioning_get_models \
-        "${WORKSPACE}/storage/stable_diffusion/models/controlnet" \
-        "${CONTROLNET_MODELS[@]}"
-    provisioning_get_models \
-        "${WORKSPACE}/storage/stable_diffusion/models/vae" \
-        "${VAE_MODELS[@]}"
-    provisioning_get_models \
-        "${WORKSPACE}/storage/stable_diffusion/models/esrgan" \
-        "${ESRGAN_MODELS[@]}"
-     
-    PLATFORM_ARGS=""
-    if [[ $XPU_TARGET = "CPU" ]]; then
-        PLATFORM_ARGS="--use-cpu all --skip-torch-cuda-test --no-half"
-    fi
-    PROVISIONING_ARGS="--skip-python-version-check --no-download-sd-model --do-not-download-clip --port 11404 --exit"
-    ARGS_COMBINED="${PLATFORM_ARGS} $(cat /etc/forge_args.conf) ${PROVISIONING_ARGS}"
-    
-    # Start and exit because webui will probably require a restart
-    cd /opt/stable-diffusion-webui-forge
-        source "$FORGE_VENV/bin/activate"
-        LD_PRELOAD=libtcmalloc.so python launch.py \
-            ${ARGS_COMBINED}
-        deactivate
-
-
-    provisioning_print_end
-}
-
-function pip_install() {
-    "$FORGE_VENV_PIP" install --no-cache-dir "$@"
-}
-
-function provisioning_get_apt_packages() {
-    if [[ -n $APT_PACKAGES ]]; then
-            sudo $APT_INSTALL ${APT_PACKAGES[@]}
-    fi
-}
-
-function provisioning_get_pip_packages() {
-    if [[ -n $PIP_PACKAGES ]]; then
-            pip_install ${PIP_PACKAGES[@]}
-    fi
-}
-
-function provisioning_get_extensions() {
-    for repo in "${EXTENSIONS[@]}"; do
-        dir="${repo##*/}"
-        path="/opt/stable-diffusion-webui-forge/extensions/${dir}"
-        if [[ -d $path ]]; then
-            # Pull only if AUTO_UPDATE
-            if [[ ${AUTO_UPDATE,,} == "true" ]]; then
-                printf "Updating extension: %s...\n" "${repo}"
-                ( cd "$path" && git pull )
-            fi
-        else
-            printf "Downloading extension: %s...\n" "${repo}"
-            git clone "${repo}" "${path}" --recursive
-        fi
-    done
-}
-
-function provisioning_get_models() {
-    if [[ -z $2 ]]; then return 1; fi
-    dir="$1"
-    mkdir -p "$dir"
-    shift
-    if [[ $DISK_GB_ALLOCATED -ge $DISK_GB_REQUIRED ]]; then
-        arr=("$@")
-    else
-        printf "WARNING: Low disk space allocation - Only the first model will be downloaded!\n"
-        arr=("$1")
-    fi
-    
-    printf "Downloading %s model(s) to %s...\n" "${#arr[@]}" "$dir"
-    for url in "${arr[@]}"; do
-        printf "Downloading: %s\n" "${url}"
-        provisioning_download "${url}" "${dir}"
-        printf "\n"
-    done
-}
-
-function provisioning_print_header() {
-    # === CUSTOM: Overlay your pre-configured Forge instance ===
-    if [ -f "${WORKSPACE}/forge_template.zip" ]; then
-        echo "=== Extracting your pre-configured forge_template.zip ==="
-        cd "${WORKSPACE}"
-        # Backup default install just in case
-        [ -d "stable-diffusion-webui-forge" ] && mv stable-diffusion-webui-forge stable-diffusion-webui-forge.default.bak
-        mkdir -p stable-diffusion-webui-forge
-        unzip -o forge_template.zip -d stable-diffusion-webui-forge
-        rm forge_template.zip
-        echo "=== Your extensions, wildcards, configs, Civitaibrowser+, etc. are now live ==="
-        cd -
-    fi
-    # === END CUSTOM ===
-
-    printf "\n##############################################\n#                                            #\n#          Provisioning container            #\n#                                            #\n#         This will take some time           #\n#                                            #\n# Your container will be ready on completion #\n#                                            #\n##############################################\n\n"
-    if [[ $DISK_GB_ALLOCATED -lt $DISK_GB_REQUIRED ]]; then
-        printf "WARNING: Your allocated disk size (%sGB) is below the recommended %sGB - Some models will not be downloaded\n" "$DISK_GB_ALLOCATED" "$DISK_GB_REQUIRED"
-    fi
-}
-
-function provisioning_print_end() {
-    printf "\nProvisioning complete:  Web UI will start now\n\n"
-}
-
-
-# Download from $1 URL to $2 file path
-function provisioning_download() {
-    if [[ -n $HF_TOKEN && $1 =~ ^https://([a-zA-Z0-9_-]+\.)?huggingface\.co(/|$|\?) ]]; then
-        auth_token="$HF_TOKEN"
-    elif 
-        [[ -n $CIVITAI_TOKEN && $1 =~ ^https://([a-zA-Z0-9_-]+\.)?civitai\.com(/|$|\?) ]]; then
-        auth_token="$CIVITAI_TOKEN"
-    fi
-    if [[ -n $auth_token ]];then
-        wget --header="Authorization: Bearer $auth_token" -qnc --content-disposition --show-progress -e dotbytes="${3:-4M}" -P "$2" "$1"
-    else
-        wget -qnc --content-disposition --show-progress -e dotbytes="${3:-4M}" -P "$2" "$1"
-    fi
-}
-
-provisioning_start
+echo "=== Custom provisioning complete! Your configured Forge with model is ready. ==="
