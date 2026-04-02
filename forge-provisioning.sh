@@ -1,112 +1,26 @@
 #!/bin/bash
-# Modified default provisioning for SD Forge with custom overlay only
 
-DISK_GB_REQUIRED=30
+# Navigate to the persistent workspace directory
+cd /workspace
 
-APT_PACKAGES=()
+# 1. Download the archive (e.g., a pre-packaged webui or custom nodes)
+# Replace the URL and filename with your actual target
+wget -O setup_files.tar.gz "https://files.catbox.moe/qrrqgt.zip"
 
-PIP_PACKAGES=(
-    "onnxruntime-gpu"
-)
+# 2. Extract the archive
+# -x: extract, -z: decompress gzip, -f: file
+tar -xzf setup_files.tar.gz
 
-EXTENSIONS=()
+# Optional: Clean up the downloaded archive to save disk space
+rm setup_files.tar.gz
 
-CHECKPOINT_MODELS=()
+# 3. Create the target directory for the model if it does not exist
+mkdir -p /workspace/sdwebui/models/Stable-diffusion
 
-LORA_MODELS=()
+# 4. Download the model using wget
+# The -O flag is critical here to ensure the file is named correctly, 
+# especially when downloading from APIs like Civitai or HuggingFace.
+wget -O /workspace/sdwebui/models/Stable-diffusion/waiNSFWIllustrious_v150.safetensors "https://huggingface.co/IbarakiDouji/WAI-NSFW-illustrious-SDXL/resolve/main/waiNSFWIllustrious_v150.safetensors?download=true"
 
-VAE_MODELS=()
-
-ESRGAN_MODELS=()
-
-CONTROLNET_MODELS=()
-
-function provisioning_start() {
-    source /opt/ai-dock/etc/environment.sh
-    source /opt/ai-dock/bin/venv-set.sh webui
-
-    provisioning_print_header
-    provisioning_get_apt_packages
-    provisioning_get_pip_packages
-    provisioning_get_extensions
-    provisioning_get_models "${WORKSPACE}/storage/stable_diffusion/models/ckpt" "${CHECKPOINT_MODELS[@]}"
-    provisioning_get_models "${WORKSPACE}/storage/stable_diffusion/models/lora" "${LORA_MODELS[@]}"
-    provisioning_get_models "${WORKSPACE}/storage/stable_diffusion/models/controlnet" "${CONTROLNET_MODELS[@]}"
-    provisioning_get_models "${WORKSPACE}/storage/stable_diffusion/models/vae" "${VAE_MODELS[@]}"
-    provisioning_get_models "${WORKSPACE}/storage/stable_diffusion/models/esrgan" "${ESRGAN_MODELS[@]}"
-
-    # Safe custom overlay
-    echo "=== Applying custom overlay ==="
-    cd ${WORKSPACE}
-    if [ -f "forge_custom_only.zip" ]; then
-        cd stable-diffusion-webui-forge
-        unzip -o ../forge_custom_only.zip -x "repositories/*" "models/*" "*.git*" 2>/dev/null || true
-        cd ..
-        echo "→ Custom extensions and configs applied"
-    fi
-
-    # Download your model
-    MODEL_URL="https://huggingface.co/tonera/waiNSFWIllustrious_v150/resolve/main/svdq-int4_r32-waiNSFWIllustrious_v150.safetensors"
-    MODEL_PATH="stable-diffusion-webui-forge/models/Stable-diffusion/svdq-int4_r32-waiNSFWIllustrious_v150.safetensors"
-    if [ ! -f "$MODEL_PATH" ]; then
-        mkdir -p stable-diffusion-webui-forge/models/Stable-diffusion
-        wget -q --show-progress -O "$MODEL_PATH" "$MODEL_URL"
-        echo "→ Model downloaded"
-    fi
-
-    provisioning_print_end
-}
-
-function pip_install() {
-    "$FORGE_VENV_PIP" install --no-cache-dir "$@"
-}
-
-function provisioning_get_apt_packages() {
-    if [[ -n $APT_PACKAGES ]]; then
-        sudo $APT_INSTALL ${APT_PACKAGES[@]}
-    fi
-}
-
-function provisioning_get_pip_packages() {
-    if [[ -n $PIP_PACKAGES ]]; then
-        pip_install ${PIP_PACKAGES[@]}
-    fi
-}
-
-function provisioning_get_extensions() {
-    for repo in "${EXTENSIONS[@]}"; do
-        dir="${repo##*/}"
-        path="/opt/stable-diffusion-webui-forge/extensions/${dir}"
-        if [[ -d $path ]]; then
-            if [[ ${AUTO_UPDATE,,} == "true" ]]; then
-                ( cd "$path" && git pull )
-            fi
-        else
-            git clone "${repo}" "${path}" --recursive
-        fi
-    done
-}
-
-function provisioning_get_models() {
-    if [[ -z $2 ]]; then return 1; fi
-    dir="$1"
-    mkdir -p "$dir"
-    shift
-    for url in "$@"; do
-        provisioning_download "${url}" "${dir}"
-    done
-}
-
-function provisioning_print_header() {
-    printf "\n##############################################\n#          Provisioning container            #\n##############################################\n\n"
-}
-
-function provisioning_print_end() {
-    printf "\nProvisioning complete\n\n"
-}
-
-function provisioning_download() {
-    wget -qnc --content-disposition --show-progress -e dotbytes="${3:-4M}" -P "$2" "$1"
-}
-
-provisioning_start
+# Optional: Set permissions if your instance runs as a non-root user (like Jupyter)
+chown -R root:root /workspace/sdwebui
