@@ -16,12 +16,12 @@ unzip setup.zip
 rm setup_files.tar.gz
 
 # 3. Create the target directory for the model if it does not exist
-mkdir -p /workspace/stable-diffusion-webui-forge/models/Stable-diffusion
+# mkdir -p /workspace/stable-diffusion-webui-forge/models/Stable-diffusion
 
 # 4. Download the model using wget
 # The -O flag is critical here to ensure the file is named correctly, 
 # especially when downloading from APIs like Civitai or HuggingFace.
-wget -O /workspace/stable-diffusion-webui-forge/models/Stable-diffusion/waiNSFWIllustrious_v150.safetensors "https://huggingface.co/IbarakiDouji/WAI-NSFW-illustrious-SDXL/resolve/main/waiNSFWIllustrious_v150.safetensors?download=true"
+#  wget -O /workspace/stable-diffusion-webui-forge/models/Stable-diffusion/waiNSFWIllustrious_v150.safetensors "https://huggingface.co/IbarakiDouji/WAI-NSFW-illustrious-SDXL/resolve/main/waiNSFWIllustrious_v150.safetensors?download=true"
 
 # Optional: Set permissions if your instance runs as a non-root user (like Jupyter)
-chown -R root:root /workspace/stable-diffusion-webui-forge
+# chown -R root:root /workspace/stable-diffusion-webui-forge
